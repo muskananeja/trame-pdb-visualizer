@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, minimal-ui">
+    <title>Molecular Visualizer</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.x/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet">
+    <link href="/static/css/3d_visualizer.css" rel="stylesheet">
+    <style>
+        .visualization-container { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 20px; 
+            justify-content: center; 
+            margin-bottom: 20px; 
+        }
+        .visualization-card { 
+            flex: 1; 
+            min-width: 300px; 
+            max-width: 500px; 
+            display: flex;
+            flex-direction: column;
+        }
+        canvas { 
+            width: 100%; 
+            height: 300px; 
+            border-radius: 4px; 
+            transition: all 0.3s ease;
+        }
+        canvas:hover {
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+        .element-badge {
+            display: inline-block;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
+            text-align: center;
+            color: white;
+            margin-right: 8px;
+            font-weight: bold;
+        }
+        .fullscreen-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 1000;
+            background: white;
+        }
+        .info-card {
+            transition: all 0.3s ease;
+        }
+        .info-card:hover {
+            transform: translateY(-5px);
+        }
+        /* B-factor gradient styles */
+        .b-factor-gradient {
+            width: 100%;
+            padding: 10px 0;
+        }
+        .gradient-bar {
+            width: 100%;
+            height: 20px;
+            border-radius: 4px;
+            background: linear-gradient(to right, blue, purple, red);
+        }
+        .caption {
+            font-size: 12px;
+            color: rgba(0,0,0,0.6);
+        }
+        .info-card:hover {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        @media (max-width: 600px) {
+            .visualization-container {
+                flex-direction: column;
+            }
+            .visualization-card {
+                max-width: 100%;
+            }
+        }
+    </style>
+    <!-- Load our visualizer scripts -->
+    <script src="/static/lib/three.min.js"></script>
+    <script src="/static/lib/OrbitControls.js"></script>
+    <script src="/static/js/simple_visualizer.js"></script>
+    <script src="/static/js/3d_visualizer.js"></script>
+</head>
+<body>
+    <div id="app">
+        <v-app>
+            <v-app-bar app color="teal darken-1" dark>
+                <v-toolbar-title>Molecular Visualizer</v-toolbar-title>
+                <v-spacer></v-spacer>
+                <v-btn text @click="loadExamplePDB" :loading="loading">
+                    <v-icon left>mdi-molecule</v-icon>
+                    Load Example PDB
+                </v-btn>
+                <v-btn text @click="showUploadDialog = true">
+                    <v-icon left>mdi-upload</v-icon>
+                    Upload PDB
+                </v-btn>
+            </v-app-bar>
+
+            <v-main>
+                <v-container>
+                    <v-row v-if="pdbInfo.filename">
+                        <v-col cols="12" md="4">
+                            <v-card class="info-card mb-4">
+                                <v-card-title>
+                                    <v-icon left color="teal">mdi-information-outline</v-icon>
+                                    {{ pdbInfo.filename }}
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-chip class="mr-2 mb-2" color="teal" outlined>
+                                        <v-icon left>mdi-atom</v-icon>
+                                        {{ pdbInfo.atoms }} Atoms
+                                    </v-chip>
+                                    <v-chip class="mr-2 mb-2" color="teal" outlined>
+                                        <v-icon left>mdi-dna</v-icon>
+                                        {{ pdbInfo.residues }} Residues
+                                    </v-chip>
+                                    <v-chip class="mr-2 mb-2" color="teal" outlined>
+                                        <v-icon left>mdi-link-variant</v-icon>
+                                        {{ pdbInfo.chains }} Chains
+                                    </v-chip>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                        <v-col cols="12" md="4">
+                            <v-card class="info-card mb-4">
+                                <v-card-title>
+                                    <v-icon left color="teal">mdi-palette</v-icon>
+                                    Visualization Options
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-select
+                                        v-model="visualStyle"
+                                        :items="visualStyles"
+                                        label="Visual Style"
+                                        outlined
+                                        dense
+                                        @change="updateVisualization"
+                                    >
+                                        <template v-slot:prepend-inner>
+                                            <v-icon color="teal">mdi-eye</v-icon>
+                                        </template>
+                                    </v-select>
+                                    
+                                    <v-select
+                                        v-model="colorMapping"
+                                        :items="colorMappings"
+                                        label="Color Mapping"
+                                        outlined
+                                        dense
+                                        @change="updateVisualization"
+                                    >
+                                        <template v-slot:prepend-inner>
+                                            <v-icon color="teal">mdi-palette</v-icon>
+                                        </template>
+                                    </v-select>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                        <v-col cols="12" md="4">
+                            <v-card class="info-card mb-4">
+                                <v-card-title>
+                                    <v-icon left color="teal">mdi-palette</v-icon>
+                                    Color Legend
+                                </v-card-title>
+                                <v-card-text>
+                                    <!-- Atom colors - shown when colorMapping is Atom -->
+                                    <div v-if="colorMapping === 'Atom'" class="d-flex flex-wrap">
+                                        <div v-for="(color, element) in atomColors" :key="element" class="mr-3 mb-2">
+                                            <span class="element-badge" :style="{backgroundColor: color}">{{ element }}</span>
+                                            {{ elementNames[element] || element }}
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- B-Factor gradient - shown when colorMapping is B-Factor -->
+                                    <div v-else-if="colorMapping === 'B-Factor'" class="b-factor-gradient">
+                                        <div class="d-flex align-center">
+                                            <div class="gradient-bar"></div>
+                                        </div>
+                                        <div class="d-flex justify-space-between mt-1">
+                                            <span>Low</span>
+                                            <span>Medium</span>
+                                            <span>High</span>
+                                        </div>
+                                        <p class="caption mt-2">Temperature factor (flexibility)</p>
+                                    </div>
+                                    
+                                    <!-- Residue colors - shown when colorMapping is Residue -->
+                                    <div v-else-if="colorMapping === 'Residue'" class="d-flex flex-wrap">
+                                        <div v-for="(color, index) in ['#33FF33', '#3333FF', '#FF3333', '#33FFFF', '#FF33FF']" :key="index" class="mr-3 mb-2">
+                                            <span class="element-badge" :style="{backgroundColor: color}">{{ index + 1 }}</span>
+                                            Residue Type {{ index + 1 }}
+                                        </div>
+                                    </div>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <v-card v-if="!pdbInfo.filename" class="mb-4 text-center">
+                        <v-card-title class="justify-center display-1 font-weight-bold teal--text">
+                            Welcome to Molecular Visualizer
+                        </v-card-title>
+                        <v-card-subtitle class="subtitle-1 font-weight-medium">
+                            Muskan Aneja's Capstone Project
+                        </v-card-subtitle>
+                        <v-card-text>
+                            <p class="body-1 mb-4">An interactive 3D platform for visualizing protein structures from Protein Data Bank (PDB) files</p>
+                            <v-icon x-large color="teal" class="mb-4">mdi-molecule</v-icon>
+                            <v-img
+                                src="https://cdn.pixabay.com/photo/2020/04/07/17/01/virus-5014495_1280.jpg"
+                                max-width="400"
+                                class="mx-auto my-4 rounded-lg"
+                                alt="Molecular structure"
+                            ></v-img>
+                            <div class="mt-6">
+                                <v-btn color="teal" @click="loadExamplePDB" :loading="loading" x-large>
+                                    <v-icon left>mdi-molecule</v-icon>
+                                    Load Example Structure
+                                </v-btn>
+                                <v-btn color="teal" outlined class="ml-2" @click="showUploadDialog = true" x-large>
+                                    <v-icon left>mdi-upload</v-icon>
+                                    Upload Your Own
+                                </v-btn>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+
+                    <!-- 3D Visualization -->
+                    <v-card v-if="pdbContent" class="mb-4">
+                        <v-card-title class="d-flex align-center">
+                            <span>3D Interactive View</span>
+                            <v-chip class="ml-2" color="teal" small>Hover over atoms for details</v-chip>
+                            <v-spacer></v-spacer>
+                            <!-- Reset View button removed as requested -->
+                            <v-btn icon small @click="toggleFullscreen('moleculeContainer')">
+                                <v-icon>{{ isFullscreen.molecule ? 'mdi-fullscreen-exit' : 'mdi-fullscreen' }}</v-icon>
+                            </v-btn>
+                        </v-card-title>
+                        <v-card-text>
+                            <div id="moleculeContainer" class="molecule-container" 
+                                :class="{'fullscreen': isFullscreen.molecule}">
+                                <!-- Atom information display -->
+                                <div id="atom-info-display"></div>
+                                
+                                <!-- Controls panel removed as requested -->
+                                <div class="controls-panel">
+                                </div>
+                                
+                                <!-- Legend panel -->
+                                <div class="legend-panel">
+                                    <!-- Atom colors - shown when colorMapping is Atom -->
+                                    <div v-if="colorMapping === 'Atom'">
+                                        <div class="legend-title">Element Colors</div>
+                                        <div v-for="(color, element) in atomColors" :key="element" class="legend-item">
+                                            <div class="legend-color" :style="{backgroundColor: color}"></div>
+                                            {{ elementNames[element] || element }}
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- B-Factor gradient - shown when colorMapping is B-Factor -->
+                                    <div v-else-if="colorMapping === 'B-Factor'">
+                                        <div class="legend-title">Temperature Factor</div>
+                                        <div class="gradient-bar"></div>
+                                        <div class="d-flex justify-space-between mt-1">
+                                            <span>Low</span>
+                                            <span>High</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Residue colors - shown when colorMapping is Residue -->
+                                    <div v-else-if="colorMapping === 'Residue'">
+                                        <div class="legend-title">Residue Types</div>
+                                        <div v-for="(color, index) in ['#33FF33', '#3333FF', '#FF3333', '#33FFFF', '#FF33FF']" :key="index" class="legend-item">
+                                            <div class="legend-color" :style="{backgroundColor: color}"></div>
+                                            Type {{ index + 1 }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                    
+                    <!-- 2D Visualizations -->
+                    <div v-if="pdbContent" class="visualization-container">
+                        <v-card class="visualization-card">
+                            <v-card-title class="d-flex align-center">
+                                <span>Top View (X-Y)</span>
+                                <v-spacer></v-spacer>
+                                <v-btn icon small @click="toggleFullscreen('topViewCanvas')">
+                                    <v-icon>{{ isFullscreen.top ? 'mdi-fullscreen-exit' : 'mdi-fullscreen' }}</v-icon>
+                                </v-btn>
+                            </v-card-title>
+                            <v-card-text>
+                                <canvas id="topViewCanvas" width="500" height="300" 
+                                    :class="{'fullscreen-canvas': isFullscreen.top}">
+                                </canvas>
+                            </v-card-text>
+                        </v-card>
+                        
+                        <v-card class="visualization-card">
+                            <v-card-title class="d-flex align-center">
+                                <span>Side View (X-Z)</span>
+                                <v-spacer></v-spacer>
+                                <v-btn icon small @click="toggleFullscreen('sideViewCanvas')">
+                                    <v-icon>{{ isFullscreen.side ? 'mdi-fullscreen-exit' : 'mdi-fullscreen' }}</v-icon>
+                                </v-btn>
+                            </v-card-title>
+                            <v-card-text>
+                                <canvas id="sideViewCanvas" width="500" height="300"
+                                    :class="{'fullscreen-canvas': isFullscreen.side}">
+                                </canvas>
+                            </v-card-text>
+                        </v-card>
+                    </div>
+
+                    <v-expansion-panels v-if="pdbContent">
+                        <v-expansion-panel>
+                            <v-expansion-panel-header>
+                                <div>
+                                    <v-icon left>mdi-code-json</v-icon>
+                                    PDB Content
+                                </div>
+                            </v-expansion-panel-header>
+                            <v-expansion-panel-content>
+                                <pre style="max-height: 300px; overflow-y: auto;">{{ pdbContent }}</pre>
+                            </v-expansion-panel-content>
+                        </v-expansion-panel>
+                    </v-expansion-panels>
+                </v-container>
+            </v-main>
+
+            <!-- File Upload Dialog -->
+            <v-dialog v-model="showUploadDialog" max-width="500px">
+                <v-card>
+                    <v-card-title>
+                        <v-icon left color="teal">mdi-upload</v-icon>
+                        Upload PDB File
+                    </v-card-title>
+                    <v-card-text>
+                        <v-alert v-if="uploadError" type="error" dense>
+                            {{ uploadError }}
+                        </v-alert>
+                        <p>Select a Protein Data Bank (PDB) file to visualize.</p>
+                        <v-file-input
+                            v-model="fileInput"
+                            accept=".pdb"
+                            label="PDB File"
+                            placeholder="Select a .pdb file"
+                            prepend-icon="mdi-file-document"
+                            show-size
+                            outlined
+                        ></v-file-input>
+                    </v-card-text>
+                    <v-card-actions>
+                        <v-spacer></v-spacer>
+                        <v-btn text @click="showUploadDialog = false">Cancel</v-btn>
+                        <v-btn 
+                            color="teal" 
+                            @click="uploadPDB" 
+                            :disabled="!fileInput"
+                            :loading="loading"
+                        >
+                            Upload
+                        </v-btn>
+                    </v-card-actions>
+                </v-card>
+            </v-dialog>
+
+            <v-footer app class="teal darken-1 white--text">
+                <div class="text-center w-100">
+                    Molecular Visualizer - 3D Interactive Structure Viewer
+                </div>
+            </v-footer>
+        </v-app>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.x/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.js"></script>
+    <script>
+        // Initialize our Vue app
+        new Vue({
+            el: '#app',
+            vuetify: new Vuetify({
+                theme: {
+                    themes: {
+                        light: {
+                            primary: '#00897B',  // teal darken-1
+                            secondary: '#26A69A', // teal lighten-1
+                            accent: '#E0F2F1'     // teal lighten-5
+                        }
+                    }
+                }
+            }),
+            data: {
+                pdbInfo: {
+                    filename: '',
+                    atoms: 0,
+                    residues: 0,
+                    chains: 0
+                },
+                pdbContent: '',
+                loading: false,
+                showUploadDialog: false,
+                fileInput: null,
+                uploadError: '',
+                isFullscreen: {
+                    top: false,
+                    side: false,
+                    molecule: false
+                },
+                showLabels: false,
+                atomColors: {
+                    'C': '#909090', // Carbon - gray
+                    'N': '#3050F8', // Nitrogen - blue
+                    'O': '#FF0D0D', // Oxygen - red
+                    'S': '#FFFF30', // Sulfur - yellow
+                    'P': '#FF8000', // Phosphorus - orange
+                    'H': '#FFFFFF', // Hydrogen - white
+                },
+                elementNames: {
+                    'C': 'Carbon',
+                    'N': 'Nitrogen',
+                    'O': 'Oxygen',
+                    'S': 'Sulfur',
+                    'P': 'Phosphorus',
+                    'H': 'Hydrogen'
+                },
+                // Visualization options
+                visualStyle: 'Ball and Stick',
+                visualStyles: [
+                    'Ball and Stick',
+                    'Protein Ribbon'
+                ],
+                colorMapping: 'Atom',
+                colorMappings: [
+                    'Atom',
+                    'B-Factor',
+                    'Residue'
+                ]
+            },
+            mounted() {
+                // Make visualizations responsive on window resize
+                window.addEventListener('resize', this.handleResize);
+                
+                // Escape key to exit fullscreen
+                window.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        this.isFullscreen.top = false;
+                        this.isFullscreen.side = false;
+                        this.isFullscreen.molecule = false;
+                    }
+                });
+            },
+            beforeDestroy() {
+                window.removeEventListener('resize', this.handleResize);
+            },
+            methods: {
+                handleResize() {
+                    // Let the visualizer handle responsive resizing via its event listener
+                    // The rest is handled by CSS
+                },
+                toggleFullscreen(canvasId) {
+                    if (canvasId === 'topViewCanvas') {
+                        this.isFullscreen.top = !this.isFullscreen.top;
+                        this.isFullscreen.side = false; 
+                        this.isFullscreen.molecule = false;
+                    } else if (canvasId === 'sideViewCanvas') {
+                        this.isFullscreen.side = !this.isFullscreen.side;
+                        this.isFullscreen.top = false;
+                        this.isFullscreen.molecule = false;
+                    } else if (canvasId === 'moleculeContainer') {
+                        this.isFullscreen.molecule = !this.isFullscreen.molecule;
+                        this.isFullscreen.top = false;
+                        this.isFullscreen.side = false;
+                    }
+                    
+                    // Redraw after toggling fullscreen
+                    this.$nextTick(() => {
+                        if (canResize && currentTopAtoms.length > 0) {
+                            if (canvasId === 'topViewCanvas' || this.isFullscreen.top) {
+                                drawMoleculeTopView('topViewCanvas', currentTopAtoms, currentBondsTop, currentTopOptions);
+                            }
+                            if (canvasId === 'sideViewCanvas' || this.isFullscreen.side) {
+                                drawMoleculeSideView('sideViewCanvas', currentSideAtoms, currentBondsSide, currentSideOptions);
+                            }
+                        }
+                        
+                        // Handle 3D view resize
+                        if (canvasId === 'moleculeContainer' && window.hasOwnProperty('onWindowResize')) {
+                            window.onWindowResize();
+                        }
+                    });
+                },
+                
+                toggleAtomLabels(show) {
+                    if (window.hasOwnProperty('toggleLabels')) {
+                        toggleLabels(show);
+                    }
+                },
+                
+                resetView() {
+                    // Reset the camera position to the default view
+                    this.$nextTick(() => {
+                        if (window.hasOwnProperty('camera') && 
+                            window.hasOwnProperty('controls')) {
+                            
+                            const container = document.getElementById('moleculeContainer');
+                            if (container) {
+                                // Reset controls to default state
+                                controls.reset();
+                                
+                                // Set camera position to see the full molecule
+                                camera.position.set(0, 0, 100);
+                                camera.lookAt(0, 0, 0);
+                                camera.updateProjectionMatrix();
+                                controls.update();
+                                
+                                // Force a render update
+                                if (window.hasOwnProperty('renderer')) {
+                                    renderer.render(scene, camera);
+                                }
+                            }
+                        }
+                    });
+                },
+                loadExamplePDB() {
+                    this.loading = true;
+                    fetch('/load_example')
+                        .then(response => response.json())
+                        .then(data => {
+                            this.pdbInfo = data.info;
+                            this.pdbContent = data.content;
+                            
+                            // Update visualizations using current style/color settings
+                            this.$nextTick(() => {
+                                this.updateVisualization();
+                                console.log('Example visualization complete');
+                            });
+                        })
+                        .catch(error => {
+                            console.error('Error loading example:', error);
+                            alert('Failed to load example PDB file');
+                        })
+                        .finally(() => {
+                            this.loading = false;
+                        });
+                },
+                updateVisualization() {
+                    // Only update if we have PDB content
+                    if (!this.pdbContent) return;
+                    
+                    console.log(`Updating visualization: Style=${this.visualStyle}, Color=${this.colorMapping}`);
+                    
+                    // Apply selected visualization style and color mapping
+                    this.$nextTick(() => {
+                        // Set common parameters
+                        let bondThreshold = 3.0; // Default
+                        let atomSizeMultiplier = 1.0; // Default
+                        
+                        // Adjust parameters based on visual style
+                        if (this.visualStyle === 'Protein Ribbon') {
+                            // For ribbon style, show fewer bonds and larger atoms
+                            bondThreshold = 2.0;
+                            atomSizeMultiplier = 1.5;
+                        } else { // Ball and Stick
+                            bondThreshold = 3.0;
+                            atomSizeMultiplier = 1.0;
+                        }
+                        
+                        // Update 2D views
+                        createTopView(this.pdbContent, 'topViewCanvas', {
+                            bondThreshold: bondThreshold,
+                            atomSizeMultiplier: atomSizeMultiplier,
+                            colorMapping: this.colorMapping,
+                            visualStyle: this.visualStyle
+                        });
+                        
+                        createSideView(this.pdbContent, 'sideViewCanvas', {
+                            bondThreshold: bondThreshold,
+                            atomSizeMultiplier: atomSizeMultiplier,
+                            colorMapping: this.colorMapping,
+                            visualStyle: this.visualStyle
+                        });
+                        
+                        // Update 3D visualization
+                        if (window.hasOwnProperty('init3DVisualizer') && 
+                            window.hasOwnProperty('visualizeMolecule3D')) {
+                            // Initialize the 3D visualizer if needed
+                            const container = document.getElementById('moleculeContainer');
+                            if (container && !container.initialized) {
+                                init3DVisualizer('moleculeContainer');
+                                container.initialized = true;
+                            }
+                            
+                            // Visualize the molecule with current settings
+                            visualizeMolecule3D(this.pdbContent, {
+                                bondThreshold: bondThreshold,
+                                atomSizeMultiplier: atomSizeMultiplier,
+                                colorMapping: this.colorMapping,
+                                visualStyle: this.visualStyle,
+                                showLabels: this.showLabels
+                            });
+                        }
+                    });
+                },
+                
+                uploadPDB() {
+                    if (!this.fileInput) {
+                        this.uploadError = 'Please select a file to upload';
+                        return;
+                    }
+                    
+                    this.loading = true;
+                    this.uploadError = '';
+                    
+                    // Create form data to send the file
+                    const formData = new FormData();
+                    formData.append('file', this.fileInput);
+                    
+                    // Send the file to the backend using the API endpoint
+                    fetch('/upload_pdb', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(data => {
+                                throw new Error(data.error || 'Upload failed');
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Process successful response
+                        this.pdbInfo = data.info;
+                        this.pdbContent = data.content;
+                        
+                        // Update visualizations
+                        this.$nextTick(() => {
+                            // Use our visualizer functions with current style/color settings
+                            this.updateVisualization();
+                            this.showUploadDialog = false;
+                            console.log('Visualization of uploaded file complete');
+                        });
+                    })
+                    .catch(error => {
+                        // Handle error
+                        console.error('Error uploading file:', error);
+                        this.uploadError = error.message || 'Failed to upload file';
+                    })
+                    .finally(() => {
+                        this.loading = false;
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html>
